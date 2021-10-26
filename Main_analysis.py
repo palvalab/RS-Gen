@@ -107,11 +107,6 @@ plot_folder = project_dir + 'Plots\\'
 if dind==2:
     data1         = np.zeros([N_freq,82,N_parc,N_parc],'single')
     data_flat     = np.zeros([N_freq,82,N_parc*N_parc],'single')
-    if parc == 'parc2009':
-        DEM_file  = settings_dir + 'DEM_matrix ' + parc + '.csv' 
-        DEM_used  = np.reshape(np.genfromtxt(DEM_file,delimiter=';'),148*148)
-    else:
-        DEM_used  = np.ones(N_parc*N_parc)
     
 else:
     data1         = np.zeros([N_freq,82,N_parc],'single')
@@ -120,12 +115,10 @@ else:
     
 for f,ff in enumerate(frequencies):
      f_str         = '{:.2f}'.format(ff)
-     if dind==0:
-         filename      = subdirectory + 'rest hf=' + f_str + ' T0 ' + parc +  '_im.csv'
-     else:
-         filename      = subdirectory + 'rest hf=' + f_str + ' T0 ' + parc +  '.csv'
+
+     filename      = subdirectory + 'rest hf=' + f_str + '.csv'
          
-     data_flat[f]      = DEM_used * np.genfromtxt(filename, delimiter=';')
+     data_flat[f]      = np.genfromtxt(filename, delimiter=';')
      
      if dind==2:
          data1[f]      = np.reshape(data_flat[f],(82,N_parc,N_parc))
