@@ -7,20 +7,26 @@ notes: python 3.7
 
 #%% IMPORT PACKAGES AND SET COLORMAPS 
 
+
 source_directory    = 'code_location\\'
 project_dir         = 'main_directory\\'
+
+
 data_dir            = project_dir + 'Data\\'
-settings_dir        = project_dir + 'Settings\\'
+settings_dir        = project_dir + 'Data\\Settings\\'
+
 
 import sys
 sys.path.append(source_directory)
 
 import numpy as np
+import scipy
 import rs_gen_functions as rsgfun
 import parc_functions as parcfun
 import surface_plotting as surf
 import plot_functions as plots
 import matplotlib as mpl
+import stats_functions as statfun
 import bootstrap as bst
 import os
 import statsmodels.sandbox.stats.multicomp as multicomp
@@ -78,24 +84,26 @@ bdnf         = np.genfromtxt(bdnf_file,delimiter='\t')
 bdnf_idx     = [list(np.where(bdnf==i)[0]) for i in [0,1]]
 bdnf_groups  = ['Val','Met'] 
 
-
-
-
+age_file     = settings_dir + 'age.csv'
+age          = np.genfromtxt(age_file,delimiter='\t')
+age[np.where(age==-1)]=np.nan
 
 #%%      ############       LOAD  DATA       ###################
-
-
-parcind   = 0         # parcellation index
-dind      = 0         # data index
 
 parcs1    = ['parc2009','Yeo7']
 parcs2    = ['parc2009','parc2011yeo7']
 N_parcs   = [148,16]
 
-parc      = parcs2[parcind]
+datatypes = ['Amplitude','DFA','wPLI']
+
+
+parcind   = 0       # parcellation index
+dind      = 1       # data index
+
+
+parc      = parcs2 [parcind]
 N_parc    = N_parcs[parcind]
 
-datatypes = ['Amplitude','DFA','wPLI']
 datatype  = datatypes[dind]
 
 subdirectory  = data_dir + 'N82_rest_' + datatype +  '\\'
@@ -107,6 +115,11 @@ plot_folder = project_dir + 'Plots\\'
 if dind==2:
     data1         = np.zeros([N_freq,82,N_parc,N_parc],'single')
     data_flat     = np.zeros([N_freq,82,N_parc*N_parc],'single')
+    if parc == 'parc2009':
+        DEM_file  = settings_dir + 'DEM_matrix ' + parc + '.csv' 
+        DEM_used  = np.reshape(np.genfromtxt(DEM_file,delimiter=';'),148*148)
+    else:
+        DEM_used  = np.ones(N_parc*N_parc)
     
 else:
     data1         = np.zeros([N_freq,82,N_parc],'single')
@@ -115,10 +128,11 @@ else:
     
 for f,ff in enumerate(frequencies):
      f_str         = '{:.2f}'.format(ff)
-
+     filename      = subdirectory + 'rest hf=' + f_str + ' T0 ' + parc +  'im.csv'
      filename      = subdirectory + 'rest hf=' + f_str + '.csv'
+
          
-     data_flat[f]      = np.genfromtxt(filename, delimiter=';')
+     data_flat[f]      = DEM_used * np.genfromtxt(filename, delimiter=';')
      
      if dind==2:
          data1[f]      = np.reshape(data_flat[f],(82,N_parc,N_parc))
@@ -140,45 +154,125 @@ parc2009 = parcfun.Parc('parc2009')
 
 #%%
    
-'''     ##############       KRUSKAL WALLIS TEST      ################      '''
+'''     ##############        Statistical tests       ################      '''
 
 
 # if dind==2:
 #     dataX = np.log10(data1)
 # else:
 
+testm = 'ancova'    
+
 dataX = data1
 
-h_krusk_comt = np.zeros([N_freq])
-p_krusk_comt = np.zeros([N_freq])
-h_krusk_bdnf = np.zeros([N_freq])
-p_krusk_bdnf = np.zeros([N_freq])        
+N_perm = 1000
+
+h_test_comt = np.zeros([N_freq])
+p_test_comt = np.zeros([N_freq])
+h_test_bdnf = np.zeros([N_freq])
+p_test_bdnf = np.zeros([N_freq])  
+
+h_perm_comt = np.zeros([N_freq,N_perm])     
+h_perm_bdnf = np.zeros([N_freq,N_perm])     
+
+if dind==2:
+    dataXmean = np.nanmean(dataX,(2,3))
+else:
+    dataXmean = np.nanmean(dataX,2)
 
 for f in range(N_freq):
     
-        a2   = [[np.nanmean(dataX[f][i]) for i in comt_idx[j]] for j in range(3)]
-        h,p = st.kruskal(a2[0],a2[1],a2[2])
-        h_krusk_comt[f] = h
-        p_krusk_comt[f] = p
-        
-        a3   = [[np.mean(dataX[f][i]) for i in bdnf_idx[j]] for j in range(2)]
-        h,p = st.kruskal(a3[0],a3[1])
-        h_krusk_bdnf[f] = h
-        p_krusk_bdnf[f] = p
+    dataA = dataXmean[f]
+    
+    if testm == 'kw':                   
+        a2  = [[dataA[i] for i in comt_idx[j]] for j in range(3)]        
+        h,p = st.kruskal(a2[0],a2[1],a2[2])        
+        h_test_comt[f] = h
+        p_test_comt[f] = p
 
+    elif testm == 'ancova':
+        tr = rsgfun.ancova_pd(comt, dataA, age)
+        h_test_comt[f] = tr['F'][0]
+        p_test_comt[f] = tr['p-unc'][0]
+            
+    if testm == 'kw':            
+        a3   = [[(dataA[i]) for i in bdnf_idx[j]] for j in range(2)]        
+        h,p = st.kruskal(a3[0],a3[1])        
+        h_test_bdnf[f] = h
+        p_test_bdnf[f] = p
+
+    elif testm == 'ancova':
+        tr = rsgfun.ancova_pd(bdnf, dataA, age)
+        h_test_bdnf[f] = tr['F'][0]
+        p_test_bdnf[f] = tr['p-unc'][0]
+      
+    for p in range(N_perm):
+        dataA1 = 1 * dataA
+        np.random.shuffle(dataA1)
+        
+        if testm == 'kw':                
+            a2   = [[dataA1[i] for i in comt_idx[j]] for j in range(3)]  
+            h_perm_comt[f,p], _ = st.kruskal(a2[0],a2[1],a2[2])    
+            a3   = [[(dataA1[i]) for i in bdnf_idx[j]] for j in range(2)]        
+            h_perm_bdnf[f,p],_  = st.kruskal(a3[0],a3[1])
+            
+        elif testm == 'ancova':
+            h_perm_comt[f,p] = rsgfun.ancova_pd(comt, dataA1, age)['F'][0]
+            h_perm_bdnf[f,p] = rsgfun.ancova_pd(bdnf, dataA1, age)['F'][0]
+                
+        if p%200 ==0:
+            print(p)
+    print(f)
+                
+                
+                
+                
 
 
 mc_meth = 'fdr_bh'
 
-sig_krusk_comt   = (p_krusk_comt <  0.05) * 1.
-sig_krusk_comt[np.where(sig_krusk_comt < 1)] = np.nan
-sig_krusk_comt_c = 1.*multicomp.multipletests(sig_krusk_comt,method=mc_meth)[0]
-sig_krusk_comt_c[np.where(sig_krusk_comt_c < 1)] = np.nan
+sig_test_comt   = (p_test_comt <  0.05) * 1.
+sig_test_comt[np.where(sig_test_comt < 1)] = np.nan
+sig_test_comt_c = 1.*multicomp.multipletests(sig_test_comt,method=mc_meth)[0]
+sig_test_comt_c[np.where(sig_test_comt_c < 1)] = np.nan
 
-sig_krusk_bdnf   = (p_krusk_bdnf <  0.05) * 1.
-sig_krusk_bdnf[np.where(sig_krusk_bdnf < 1)] = np.nan
-sig_krusk_bdnf_c = 1.*multicomp.multipletests(sig_krusk_bdnf,method=mc_meth)[0]
-sig_krusk_bdnf_c[np.where(sig_krusk_bdnf_c < 1)] = np.nan
+sig_test_bdnf   = (p_test_bdnf <  0.05) * 1.
+sig_test_bdnf[np.where(sig_test_bdnf < 1)] = np.nan
+sig_test_bdnf_c = 1.*multicomp.multipletests(sig_test_bdnf,method=mc_meth)[0]
+sig_test_bdnf_c[np.where(sig_test_bdnf_c < 1)] = np.nan
+
+if testm == 'ancova':
+    f_comt = scipy.stats.f.ppf(q=1-0.05, dfn=3-1, dfd=79-3)
+    f_bdnf = scipy.stats.f.ppf(q=1-0.05, dfn=2-1, dfd=79-2)
+else:
+    inds = np.argsort(p_test_comt)
+    f_comt = np.interp([0.05],p_test_comt[inds], h_test_comt[inds])    
+    inds = np.argsort(p_test_bdnf)
+    f_bdnf = np.interp([0.05],p_test_bdnf[inds], h_test_bdnf[inds])
+    
+    
+
+clusters_comt = prox_cluster_1D(h_test_comt > f_comt)
+clusters_bdnf = prox_cluster_1D(h_test_bdnf > f_bdnf)
+
+
+if len(clusters_comt)>0:
+    h_cluster_comt = [np.sum(h_test_comt[c]) for c in clusters_comt]
+    max_h_comt     = np.max(h_cluster_comt)
+    maxind_comt    = np.argmax(h_cluster_comt)
+    h_clusters_comt_perm = np.sum(h_perm_comt[clusters_comt[maxind_comt]],0)  
+    np.percentile(h_clusters_comt_perm, 95)
+
+if len(clusters_bdnf)>0:
+    h_cluster_bdnf = [np.sum(h_test_bdnf[c]) for c in clusters_bdnf]
+    maxind_bdnf    = np.argmax(h_cluster_bdnf)
+    max_h_bdnf     = np.max(h_cluster_bdnf)
+    h_clusters_bdnf_perm = np.sum(h_perm_bdnf[clusters_bdnf[maxind_bdnf]],0)  
+    np.percentile(h_clusters_bdnf_perm, 95)
+
+
+
+
 
 
 #%% 
@@ -240,8 +334,8 @@ for f,ff in enumerate(frequencies):
 plot_data_comt = np.zeros([3,3,N_freq])
 plot_data_bdnf = np.zeros([2,3,N_freq])
 
-export = False
-filetype = 'pdf'
+export = 0
+filetype = 'png'
 plot_data = 'CI'
 
 if plot_data == 'SD':
@@ -267,21 +361,23 @@ elif plot_data == 'CI':
             plot_data_bdnf[i,:,f] = bdnf_stats[f][i]
         
 
-ylims       = [ [10, 26] ,      [0.55, 0.75], [0,0.155]    ]
+ylims       = [ [10, 29] ,      [0.55, 0.75], [0,0.155]    ]
 ylim        = ylims[dind]
 
+outdir = plot_folder + 'Mean values ' + datatype +'\\'
+
 if export:
-    outfile1    = plot_folder + 'Mean values ' + datatype + '\\COMT.' + filetype
-    outfile2    = plot_folder + 'Mean values ' + datatype + '\\BDNF.' + filetype
+    outfile1    = outdir + 'COMT_' + testm + '.' + filetype
+    outfile2    = outdir + 'BDNF_' + testm + '.' + filetype
 else:
     outfile1 = outfile2 = 'none'
 
 
-plots.semi_log_plot([6,2.5],plot_data_comt[:3,:3,:],frequencies,[3,60],
+plots.semi_log_plot([6,2.5],plot_data_comt[:3,:3,:],frequencies,[3,62],
                     ylabel,legend=None,legend_pos=None,show=True,
                     cmap=my_cmap3,CI=0.25, xticks=[3,5,10,20,30,60,120],
                     ylim=ylim,outfile=outfile1,bgcolor=(1,1,1),ncols=1,
-                    sig_id=sig_krusk_comt,sig_fac=1.2
+                    sig_id=sig_test_comt,sig_fac=1.
                     )
 
 
@@ -290,18 +386,35 @@ plots.semi_log_plot([6,2.5],plot_data_bdnf[:3,:3,:],frequencies,[3,60],
                     legend_pos=None,show=True,
                     cmap=my_cmap3,CI=0.25,xticks=[3,5,10,20,30,60,120],
                     ylim=ylim,outfile=outfile2,bgcolor=(1,1,1),ncols=1,
-                    sig_id=sig_krusk_bdnf,sig_style='-',sig_fac=1.02
+                    sig_id=sig_test_bdnf,sig_style='*',sig_fac=1.02
                     )
 
 
 
+#%% save plot data
 
 
+outfile_comt_mean   = outdir + 'values and p\\COMT mean.csv'
+outfile_comt_lower  = outdir + 'values and p\\COMT lower CI.csv'
+outfile_comt_upper  = outdir + 'values and p\\COMT upper CI.csv'
+outfile_comt_pval   = outdir + 'values and p\\COMT pvals.csv'
 
 
+np.savetxt(outfile_comt_mean, plot_data_comt[:,0],delimiter=';')
+np.savetxt(outfile_comt_lower,plot_data_comt[:,1],delimiter=';')
+np.savetxt(outfile_comt_upper,plot_data_comt[:,2],delimiter=';')
+np.savetxt(outfile_comt_pval, p_test_comt,delimiter=';')
 
+outfile_bdnf_mean   = outdir + 'values and p\\BDNF mean.csv'
+outfile_bdnf_lower  = outdir + 'values and p\\BDNF lower CI.csv'
+outfile_bdnf_upper  = outdir + 'values and p\\BDNF upper CI.csv'
+outfile_bdnf_pval   = outdir + 'values and p\\BDNF pvals.csv'
 
 
+np.savetxt(outfile_bdnf_mean, plot_data_bdnf[:,0],delimiter=';')
+np.savetxt(outfile_bdnf_lower,plot_data_bdnf[:,1],delimiter=';')
+np.savetxt(outfile_bdnf_upper,plot_data_bdnf[:,2],delimiter=';')
+np.savetxt(outfile_bdnf_pval, p_test_bdnf,delimiter=';')
 
 
 
@@ -313,138 +426,30 @@ plots.semi_log_plot([6,2.5],plot_data_bdnf[:3,:3,:],frequencies,[3,60],
 
 
 
-#%%
 
 
-'''    ###############       SYNCH NETWORK ANALYSIS     ################    '''
 
 
-#%%
 
-'''  ###############   PLOT synch data in yeo 7 networks    ##############  '''
 
+'''                 #######################################################                     '''
 
-#%% load networks
 
-networks_file         = settings_dir + 'networks ' + parc + '.csv'
-networks              = np.genfromtxt(networks_file,delimiter=';')
 
-if parc == 'parc2009':
-    for i in [ 28,  29,  30,  31, 106, 144, 145]:
-        networks[i] = -1
 
-network_names         = ['FP','DM','SM','Lim','VA','DA','Vis']
-network_idx           = [np.array(np.where(networks==i)[0])   for i in range(7)]
-network_masks_within  = [np.outer(networks==i,networks==i)    for i in range(7)]
-network_masks_all     = [[np.outer(networks==i,networks==j)   for i in range(7)] for j in range(7)]
-network_mask_sums     = [[np.sum(np.reshape(DEM_used,[N_parc,N_parc])*network_masks_all[i][j]) for i in range(7)] for j in range(7)]
 
-network_l = [a[0:1] for a in network_idx]  
-network_r = [a[1:2] for a in network_idx]
 
 
-#%% morph to yeo7 and collapse in frequency bands
 
 
 
-data1a     = np.zeros([N_freq,82,7,7],'single')
 
 
-# select hemi    
-hemi = 'cross'                   # can be "all", "left", "right", "cross" 
-        
-if hemi == "cross":                    
-    nix1 = network_l
-    nix2 = network_r
-elif hemi == 'left':
-    nix1 = network_l
-    nix2 = network_l                
-elif hemi == 'right':
-    nix1 = network_r
-    nix2 = network_r
-else:                        
-    nix1 = nix2 = network_idx
-                    
-for f in range(N_freq):
-    for s in range(82):
-        for n1 in range(7):
-            for n2 in range(7):
-                dummy =  data1[f,s,nix1[n1],:]  
-                data1a[f,s,n1,n2] =  np.mean(dummy[:,nix2[n2]])
+#%% 
 
 
-# collapse to freq bands        
- 
-mean_comt     = np.array([[ np.mean (data1a[f,comt_idx[i]],axis=0) for i in [0,1,2]] 
-                          for f in range(N_freq)])
-mean_bdnf     = np.array([[ np.mean (data1a[f,bdnf_idx[i]],axis=0) for i in [0,1]  ] 
-                          for f in range(N_freq)])
-                 
-mean_comt_pf  = np.array([ np.mean(mean_comt[fb],0) for fb in f_bands])
-mean_bdnf_pf  = np.array([ np.mean(mean_bdnf[fb],0) for fb in f_bands])
 
-
-#%%
-
-save_datatype = '.eps'
-
-#%% plot COMT values in 7 networks
-
-
-vmaxA = [0.075,0.105,0.045,0.06, 0.06]
-fig   = rsgfun.plot_comt_values(N_bands,mean_comt_pf,f_band_str,comt_groups,network_names,vmaxA)
- 
-
-fig.savefig(plot_folder + 'synch\\COMT_values_' + hemi + save_datatype, 
-       )    
-    
-#%% plot BDNF values  in 7 networks  
-
-vmaxA = [0.09, 0.105, 0.048, 0.054, 0.054]
-fig   = rsgfun.plot_bdnf_values(N_bands,mean_bdnf_pf,f_band_str,bdnf_groups,network_names,vmaxA)
-
-fig.savefig(plot_folder + 'synch\\BDNF_values_' + hemi + save_datatype)    
- 
-    
-#%% plot COMT differences  
-
-vmaxA = [0.010, 0.012, 0.004, 0.010]
-fig   = rsgfun.plot_comt_diff(N_bands,mean_comt_pf,f_band_str,comt_groups,network_names,vmaxA)
-
-fig.savefig(plot_folder + 'synch\\COMT_diffs_' + hemi + save_datatype)    
-
-
-#%% plot BDNF differences 
-
-vmaxA = [0.018, 0.03, 0.006, 0.006]
-fig   = rsgfun.plot_bdnf_diff(N_bands,mean_bdnf_pf,f_band_str,bdnf_groups,network_names,vmaxA)
-
-fig.savefig(plot_folder + 'synch\\BDNF_diffs_' + hemi + save_datatype)    
-
-
-#%% kruskal-wallis for COMT
-
-fig = rsgfun.synch_test_comt(data1a,N_bands,f_bands,comt_idx,network_names,f_band_str)
- 
-
-
-
-#%% kruskal-wallis for BDNF
-
-fig = rsgfun.synch_test_bdnf(data1a,N_bands,f_bands,bdnf_idx,network_names,f_band_str)
-
-fig.savefig(plot_folder + 'synch\\BDNF_diff_sign_' + hemi + save_datatype)    
-
-
-
-
-
-
-#%%
-
-
-
-'''  ###########            Amp & DFA analysis by subsystem and f-band          ##############  '''
+'''  ###########           Amp & DFA analysis by subsystem and f-band        ##############  '''
 
 
 #%% 
@@ -546,7 +551,7 @@ plot_folder = project_dir + 'Plots\\'
 groups = [comt_idx[0],comt_idx[1],comt_idx[2],bdnf_idx[0],bdnf_idx[1]]
 group_names = ['Val-Val', 'Val-Met', 'Met-Met', 'Val', 'Met']
 pair_names  = ['Val-Met - Met-Met','Val-Met - Val-Val','Val-Val - Met-Met', 'Val - Met']
-pair_names2 = ['Met-Met - Val-Met','Val-Val - Val-Met','Met-Met - Val-Val', 'Met - Val']
+#pair_names2 = ['Met-Met - Val-Met','Val-Val - Val-Met','Met-Met - Val-Val', 'Met - Val']
 
 group_pairs = [
     [comt_idx[1],comt_idx[2]],
@@ -561,6 +566,12 @@ f_band_data = np.stack([np.mean(data2[f_inds],0) for f_inds in f_bands ])
 
 plot_data = np.stack([np.mean(f_band_data[:,gr_inds],1) for gr_inds in groups])
 
+
+gr_masks = np.ones([4,82])
+gr_masks[0][np.where(comt==0)[0]]=np.nan
+gr_masks[1][np.where(comt==2)[0]]=np.nan
+gr_masks[2][np.where(comt==1)[0]]=np.nan
+gr_codes = [comt,comt,comt,bdnf]
 
 if datatype == 'DFA':
     zmax = [0.64,0.71,0.71,0.64]
@@ -601,7 +612,7 @@ for gr in range(5):
 
 #%% compute group means and differences
 
-test_type = 'MWU'          
+test_type = 'Welch'           # 'ancova' or 'MWU' or 'Welch' or 'Kruskal'
 
 diffs = np.zeros([N_freq,N_pairs,N_parc])
 stats = np.zeros([N_freq,N_pairs,N_parc])
@@ -610,24 +621,36 @@ K_pos = np.zeros([N_pairs,N_freq])
 K_neg = np.zeros([N_pairs,N_freq])
 means = np.zeros([N_freq,N_groups,N_parc])
 
+
 for f in range(N_freq):
-    data_f = data1[f]
-    for g in range(N_groups):
-        means[f,g] = np.mean(data_f[groups[g]],0)
     
-    for g in range(N_pairs):
+    data_f = data1[f]
+    
+    for g in range(N_pairs): 
+        
         groups12 = group_pairs[g]
         gr1 = data_f[groups12[0]]
-        gr2 = data_f[groups12[1]]
-        for p in range(N_parc):            
+        gr2 = data_f[groups12[1]] 
+        
+        for p in range(N_parc): 
+            
             diffs[f,g,p] = np.mean(gr1[:,p]) - np.mean(gr2[:,p])
             
-            if test_type == 'Welch':
+            if test_type == 'ancova':
+                tr = rsgfun.ancova_pd(gr_codes[g], data1[f,:,p]*gr_masks[g], age)
+                pvals[f,g,p] = tr['p-unc'][0]
+            elif test_type == 'Welch':
                 stats[f,g,p], pvals[f,g,p] = ttest_ind(gr1[:,p],gr2[:,p])
             elif test_type == 'Kruskal':                  
                 stats[f,g,p], pvals[f,g,p] = kruskal(gr1[:,p],gr2[:,p])
             elif test_type == 'MWU':
                 stats[f,g,p], pvals[f,g,p] = mannwhitneyu(gr1[:,p],gr2[:,p])
+                
+    print(f)
+                    
+           
+                
+
 
                         
 alpha = 0.05
@@ -648,7 +671,7 @@ else:
     ylim = [-27, 27]
     yticks = np.arange(-20,26,10) 
     
-save_filetype = 'none'# '.eps'             # '.eps' or '.png' or 'none'
+save_filetypes = ['png','eps','pdf' ]             # 'eps' or 'png' or 'none'
 
 
 
@@ -670,17 +693,22 @@ plot_data = np.transpose(np.concatenate([K_pos[:,:3],-K_neg[:,:3],
 cmap = plots.make_cmap([(1,.5,0),(0,0,1),(1,0,1),(1,.5,0),(0,0,1),(1,0,1),(.4,.4,.4),(.4,.4,.4)])
 legend=['Val/Met - Met/Met','Val/Met - Val/Val','Val/Val - Met/Met']
 
-if save_filetype == 'none':
-    outfile = 'none'
-else:
-    outfile = plot_folder + 'P+- plots ' + datatype + '\\COMT' + save_filetype
 
-plots.semi_log_plot([7,3],plot_data,frequencies,xlim=[3,60],ylabel='P [%]',
-                    legend=legend,outfile=outfile,xticks=xticks,
-                    ylim=ylim,yticks=yticks,title='COMT',cmap=cmap,ncols=1)    
+outdir = plot_folder + 'P+- plots ' + datatype + '\\'
 
-datafile_name = plot_folder + '__plot_data\\P_plots\\' + datatype + ' COMT.csv'
+for i in range(len(save_filetypes)):
+    save_filetype = save_filetypes[i]
+    show = [True,False,False,False,False][i]
+    outfile = outdir + save_filetype + '\\' + datatype[:3] + '_COMT_' + test_type + '.' + save_filetype
+
+    plots.semi_log_plot([7,3],plot_data,frequencies,xlim=[3,60],ylabel='P [%]',
+                        legend=legend,outfile=outfile,xticks=xticks,show=show,
+                        ylim=ylim,yticks=yticks,title='COMT',cmap=cmap,ncols=1)    
+
+datafile_name = outdir + 'values\\' + datatype[:3] + '_COMT_' + test_type + '.csv'
 np.savetxt(datafile_name,np.around(plot_data[:6],4),delimiter=';',fmt='%.4f')
+
+
 
 
 
@@ -690,17 +718,17 @@ plot_data = np.transpose(np.concatenate([K_pos[:,3:],-K_neg[:,3:],np.expand_dims
 cmap=plots.make_cmap([(0,0,1),(0,0,1),(.4,.4,.4),(.4,.4,.4)])
 
 
-if save_filetype == 'none':
-    outfile = 'none'
-else:
-    outfile = plot_folder + 'P+- plots ' + datatype + '\\BDNF' + save_filetype
 
-plots.semi_log_plot([7,3],plot_data,frequencies,xlim=[3,60],ylabel='P [%]',
-                    legend=['Val - Met'],ylim=ylim,yticks=yticks,xticks=xticks,
+for i in range(len(save_filetypes)):
+    save_filetype = save_filetypes[i]
+    show = [True,False,False,False,False][i]
+    outfile = outdir + save_filetype + '\\BDNF_' + test_type + '.' + save_filetype   
+    plots.semi_log_plot([7,3],plot_data,frequencies,xlim=[3,60],ylabel='P [%]',
+                    legend=['Val - Met'],ylim=ylim,yticks=yticks,xticks=xticks,show=show,
                     title='BDNF',cmap=cmap,ncols=1,outfile=outfile)    
 
-datafile_name = plot_folder + '__plot_data\\P_plots\\' + datatype + ' BDNF.csv'
-np.savetxt(datafile_name,np.around(plot_data[:2],4),delimiter=';',fmt='%.4f')
+datafile_name = outdir + 'values\\BDNF_' + test_type + '.csv'
+np.savetxt(datafile_name,np.around(plot_data[:6],4),delimiter=';',fmt='%.4f')
 
 
 #%% make plots in selected freq. ranges
@@ -823,6 +851,7 @@ for c in range(len(combs)):
 
 
 
+#%%
 
 
 
@@ -833,6 +862,145 @@ for c in range(len(combs)):
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#%%
+
+
+'''    ###############       SYNCH NETWORK ANALYSIS     ################    '''
+
+
+#%%
+
+'''  ###############   Plot synch data in yeo 7 networks    ##############  '''
+
+
+#%% load networks
+
+networks_file         = settings_dir + 'networks ' + parc + '.csv'
+networks              = np.genfromtxt(networks_file,delimiter=';')
+
+if parc == 'parc2009':
+    for i in [ 28,  29,  30,  31, 106, 144, 145]:
+        networks[i] = -1
+
+network_names         = ['FP','DM','SM','Lim','VA','DA','Vis']
+network_idx           = [np.array(np.where(networks==i)[0])   for i in range(7)]
+network_masks_within  = [np.outer(networks==i,networks==i)    for i in range(7)]
+network_masks_all     = [[np.outer(networks==i,networks==j)   for i in range(7)] for j in range(7)]
+network_mask_sums     = [[np.sum(np.reshape(DEM_used,[N_parc,N_parc])*network_masks_all[i][j]) for i in range(7)] for j in range(7)]
+
+network_l = [a[0:1] for a in network_idx]  
+network_r = [a[1:2] for a in network_idx]
+
+
+#%% morph to yeo7 and collapse in frequency bands
+
+
+
+data1a     = np.zeros([N_freq,82,7,7],'single')
+
+
+# select hemi    
+hemi = 'both'                   # can be "all", "left", "right", "cross" 
+        
+if hemi == "cross":                    
+    nix1 = network_l
+    nix2 = network_r
+elif hemi == 'left':
+    nix1 = network_l
+    nix2 = network_l                
+elif hemi == 'right':
+    nix1 = network_r
+    nix2 = network_r
+else:                        
+    nix1 = nix2 = network_idx
+                    
+for f in range(N_freq):
+    for s in range(82):
+        for n1 in range(7):
+            for n2 in range(7):
+                dummy =  data1[f,s,nix1[n1],:]  
+                data1a[f,s,n1,n2] =  np.mean(dummy[:,nix2[n2]])
+
+
+# collapse to freq bands        
+ 
+mean_comt     = np.array([[ np.mean (data1a[f,comt_idx[i]],axis=0) for i in [0,1,2]] 
+                          for f in range(N_freq)])
+mean_bdnf     = np.array([[ np.mean (data1a[f,bdnf_idx[i]],axis=0) for i in [0,1]  ] 
+                          for f in range(N_freq)])
+                 
+mean_comt_pf  = np.array([ np.mean(mean_comt[fb],0) for fb in f_bands])
+mean_bdnf_pf  = np.array([ np.mean(mean_bdnf[fb],0) for fb in f_bands])
+
+
+#%%
+
+save_datatype = '.eps'
+
+#%% plot COMT values in 7 networks
+
+
+vmaxA = [0.075,0.105,0.045,0.06, 0.06]
+fig   = rsgfun.plot_comt_values(N_bands,mean_comt_pf,f_band_str,comt_groups,network_names,vmaxA)
+ 
+
+fig.savefig(plot_folder + 'synch\\COMT_values_' + hemi + save_datatype, 
+       )    
+    
+#%% plot BDNF values  in 7 networks  
+
+vmaxA = [0.09, 0.105, 0.048, 0.054, 0.054]
+fig   = rsgfun.plot_bdnf_values(N_bands,mean_bdnf_pf,f_band_str,bdnf_groups,network_names,vmaxA)
+
+fig.savefig(plot_folder + 'synch\\BDNF_values_' + hemi + save_datatype)    
+ 
+    
+#%% plot COMT differences  
+
+vmaxA = [0.010, 0.012, 0.004, 0.010]
+fig   = rsgfun.plot_comt_diff(N_bands,mean_comt_pf,f_band_str,comt_groups,network_names,vmaxA)
+
+fig.savefig(plot_folder + 'synch\\COMT_diffs_' + hemi + save_datatype)    
+
+
+#%% plot BDNF differences 
+
+vmaxA = [0.018, 0.03, 0.006, 0.006]
+fig   = rsgfun.plot_bdnf_diff(N_bands,mean_bdnf_pf,f_band_str,bdnf_groups,network_names,vmaxA)
+
+fig.savefig(plot_folder + 'synch\\BDNF_diffs_' + hemi + save_datatype)    
+
+
+#%% kruskal-wallis for COMT
+
+fig = rsgfun.synch_test_comt(data1a,N_bands,f_bands,comt_idx,network_names,f_band_str)
+ 
+
+
+
+#%% kruskal-wallis for BDNF
+
+fig = rsgfun.synch_test_bdnf(data1a,N_bands,f_bands,bdnf_idx,network_names,f_band_str)
+               
+
+fig.savefig(plot_folder + 'synch\\BDNF_diff_sign_' + hemi + save_datatype)    
 
 
 
