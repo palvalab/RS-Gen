@@ -5,10 +5,16 @@ Created on Tue Apr 20 10:56:46 2021
 notes: python 3.7
 """
 
+
 source_directory    = 'code_location\\'
 project_dir         = 'main_directory\\'
+
+
+source_directory    = 'K:\\palva\\Felix\\Python37\\Data analysis\\Brattico PS\\repo\\'
+project_dir         = 'L:\\nttk_palva\\Projects\\Brattico\\'
+
 data_dir            = project_dir + 'Data\\'
-settings_dir        = project_dir + 'Settings\\'
+settings_dir        = project_dir + 'Data\\Settings\\'
 
 import sys
 sys.path.append(source_directory)
@@ -48,6 +54,7 @@ freq_strings1 = ['{:.1f}'.format(f) for f in frequencies]
 #%% group means per parcel (pair)
 
 # load comt and bdnf info
+
 comt_file    = settings_dir + 'comt.txt'
 comt         = np.genfromtxt(comt_file,delimiter='\t')
 comt         = np.delete(comt,60)
@@ -284,9 +291,3 @@ for g in range(N_gr):
     # Grand mean and CLs are in shape:  frequency band x cohort
     # permutation results are in shape: parcel x permutation
     # permutation results mop are in shape: frequency x permutation
-
-
-
-
-
-                       
